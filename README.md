@@ -22,3 +22,13 @@ uv sync
 ```bash
 uf run -m mnist_mlp.train
 ```
+
+Training
+
+| Device | Training Time in One Epoch |
+| ------ | -------------------------- |
+| CPU    | 1.87 s                     |
+| GPU    |                            |
+
+CPU time is measured on Apple M3 Pro.
+The training time is measured for the subsequent epochs after the first jit compilation.
