@@ -23,7 +23,7 @@ uv sync
 uf run -m mnist_mlp.train
 ```
 
-Training
+The training time for one epoch (batch size = 128) is as follows:
 
 | Device | Training Time in One Epoch |
 | ------ | -------------------------- |
