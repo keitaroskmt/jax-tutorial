@@ -1,0 +1,25 @@
+[project]
+name = "jax-tutorial"
+version = "0.1.0"
+description = "Add your description here"
+readme = "README.md"
+requires-python = ">=3.12"
+dependencies = [
+    "jax>=0.7.2",
+    "jupyter>=1.1.1",
+    "matplotlib>=3.10.7",
+    "scikit-learn>=1.7.2",
+    "torch>=2.8.0",
+    "torchvision>=0.23.0",
+]
+
+[dependency-groups]
+dev = [
+    "ruff>=0.14.8",
+]
+
+[tool.ruff.format]
+docstring-code-format = true
+
+[tool.ruff.lint]
+select = ["ALL"]
