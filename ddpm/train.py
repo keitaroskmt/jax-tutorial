@@ -128,10 +128,10 @@ if __name__ == "__main__":
         logger.info("Epoch %d, Test Loss: %.4f", epoch + 1, test_loss)
 
     # Save the trained model
-    save_dir = Path("./ddpm/saved_model")
+    save_dir = Path("./ddpm/saved_model") / f"unet_cifar10_lr_{learning_rate}"
     save_dir.mkdir(parents=True, exist_ok=True)
 
-    options = ocp.CheckpointManagerOptions(max_to_keep=3, create=True)
+    options = ocp.CheckpointManagerOptions(create=True)
     with ocp.CheckpointManager(save_dir.absolute(), options=options) as mngr:
         mngr.save(step=state.step, args=ocp.args.StandardSave(state))
         mngr.wait_until_finished()
