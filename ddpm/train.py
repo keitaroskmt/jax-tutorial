@@ -4,6 +4,7 @@ import logging
 import time
 from pathlib import Path
 
+import absl
 import jax
 import jax.numpy as jnp
 import optax
@@ -16,7 +17,7 @@ from src.model.unet import UNet
 
 # Hyperparameters
 batch_size = 128
-num_epochs = 1
+num_epochs = 20
 learning_rate = 1e-3
 
 
@@ -95,8 +96,9 @@ def eval_step(
 
 
 if __name__ == "__main__":
-    logging.basicConfig(level=logging.INFO)
+    logging.basicConfig(level=logging.INFO, force=True)
     logger = logging.getLogger(__name__)
+    absl.logging.set_verbosity(absl.logging.WARNING)
 
     train_loader, test_loader = get_loaders(batch_size)
     key = jax.random.key(0)
@@ -110,7 +112,6 @@ if __name__ == "__main__":
         for data, _ in train_loader:
             key, subkey = jax.random.split(key)
             state, loss = train_step(state, diffusion, subkey, data)
-            break
         epoch_time = time.time() - start_time
         logger.info("Epoch %d, Loss: %.4f", epoch + 1, loss)
         logger.info("Epoch %d completed in %.2f seconds", epoch + 1, epoch_time)
@@ -123,7 +124,6 @@ if __name__ == "__main__":
             loss = eval_step(state, diffusion, subkey, data)
             test_loss += jnp.sum(loss)
             num_samples += data.shape[0]
-            break
         test_loss /= num_samples
         logger.info("Epoch %d, Test Loss: %.4f", epoch + 1, test_loss)
 
