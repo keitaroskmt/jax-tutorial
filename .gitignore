@@ -10,3 +10,5 @@ wheels/
 .venv
 # Trained models
 saved_model/
+# Generated samples
+ddpm/samples/

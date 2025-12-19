@@ -5,7 +5,6 @@ from typing import Self
 
 import jax
 import jax.numpy as jnp
-from flax import linen as nn
 from flax import struct
 
 
@@ -13,7 +12,7 @@ from flax import struct
 class Diffusion:
     """Diffusion model for generative modeling."""
 
-    diffusion_steps: int
+    diffusion_steps: int = struct.field(pytree_node=False)
     beta: jax.Array
     alpha: jax.Array
     alpha_bar: jax.Array
@@ -84,8 +83,7 @@ class Diffusion:
         key: jax.Array,
         x_t: jax.Array,
         t: int,
-        model: nn.Module,
-        params: dict,
+        model_apply: Callable,
     ) -> jax.Array:
         """Sample x_{t-1} from p(x_{t-1} | x_t).
 
@@ -93,18 +91,18 @@ class Diffusion:
             key: JAX random key.
             x_t: Image being restored at time step t.
             t: Time step.
-            model: Noise estimator, which accepts (x_t, t) as input.
-            params: Model parameters.
+            model_apply: Noise estimator, which accepts (x_t, t) as input.
 
         """
-        _, subkey = jax.random.split(key)
-        beta_t = self.beta[t][:, None, None, None]
-        alpha_bar_t = self.alpha_bar[t][:, None, None, None]
-        noise = jax.random.normal(subkey, x_t.shape) if t > 0 else 0
-        predicted_noise = model.apply(params, x_t, jnp.array([t]))
-        if x_t.shape != predicted_noise.shape:
-            msg = f"Shape mismatch: {x_t.shape} != {predicted_noise.shape}"
-            raise ValueError(msg)
+        beta_t = self.beta[t]
+        alpha_bar_t = self.alpha_bar[t]
+        noise = jax.lax.cond(
+            t > 0,
+            lambda k: jax.random.normal(k, x_t.shape),
+            lambda _: jnp.zeros(x_t.shape),
+            key,
+        )
+        predicted_noise = model_apply(x_t, jnp.full((x_t.shape[0],), t))
 
         # Equation (11) in the paper
         return (x_t - beta_t / jnp.sqrt(1 - alpha_bar_t) * predicted_noise) / jnp.sqrt(
@@ -114,46 +112,95 @@ class Diffusion:
     def reverse_diffusion(
         self,
         key: jax.Array,
-        x_t: jax.Array,
-        model: nn.Module,
-        params: dict,
+        model_apply: Callable,
+        shape: tuple,
     ) -> jax.Array:
         """Restore the image x_0 from noisy samples x_t using p(x_{t-1} | x_t).
 
         Args:
             key: JAX random key.
-            x_t: Noisy samples following the normal distribution: N(0, I), where t is
-                the number of steps.
-            model: Noise estimator, which accepts (x_t, t) as input.
-            params: Model parameters.
+            diffusion_model: Diffusion model.
+            model_apply: Noise estimator, which accepts (x_t, t) as input.
+            shape: Shape of the output image.
+
+        Returns:
+            Reconstructed image with the given shape.
 
         """
-        for step in reversed(range(self.diffusion_steps)):
-            x_t = self.reverse_diffusion_one_step(key, x_t, step, model, params)
-        return x_t
+        key, subkey = jax.random.split(key)
 
+        def body_fun(
+            i: int,
+            val: tuple[jax.Array, jax.Array],
+        ) -> tuple[jax.Array, jax.Array]:
+            key, x = val
+            key, subkey = jax.random.split(key)
+            x_prev = self.reverse_diffusion_one_step(
+                key=subkey,
+                x_t=x,
+                t=self.diffusion_steps - 1 - i,  # Time step in reverse order
+                model_apply=model_apply,
+            )
+            return key, x_prev
 
-def sample(
-    key: jax.Array,
-    diffusion_model: Diffusion,
-    noise_estimator: nn.Module,
-    shape: tuple,
-) -> jax.Array:
-    """Sample from the diffusion model.
+        return jax.lax.fori_loop(
+            lower=0,
+            upper=self.diffusion_steps,
+            body_fun=body_fun,
+            init_val=(key, jax.random.normal(subkey, shape)),
+        )
 
-    Args:
-        key: JAX random key.
-        diffusion_model: Diffusion model.
-        noise_estimator: Noise estimator.
-        shape: Shape of the output image.
+    def reverse_diffusion_with_intermediate(
+        self,
+        key: jax.Array,
+        model_apply: Callable,
+        shape: tuple,
+        num_intermediate: int = 10,
+    ) -> tuple[jax.Array, jax.Array]:
+        """Restore the image x_0 from noisy samples x_t, returning intermediate steps.
 
-    Returns:
-        Reconstructed image with the given shape.
+        Args:
+            key: JAX random key.
+            diffusion_model: Diffusion model.
+            model_apply: Noise estimator, which accepts (x_t, t) as input.
+            shape: Shape of the output image.
+            num_intermediate: Number of intermediate steps to return.
 
-    """
-    x_t = jax.random.normal(key, shape)
-    return diffusion_model.reverse_diffusion(
-        key,
-        x_t,
-        noise_estimator,
-    )
+        Returns:
+            Tuple of:
+            - Reconstructed image with the given shape.
+            - List of reconstructed images with `num_intermediate` length.
+
+        """
+        key, subkey = jax.random.split(key)
+        buf = jnp.zeros((num_intermediate, *shape))
+
+        def body_fun(
+            carry: tuple[jax.Array, jax.Array, jax.Array, int],
+            t: int,
+        ) -> tuple[jax.Array, jax.Array, jax.Array, int]:
+            key, x, buf, k = carry
+            key, subkey = jax.random.split(key)
+            x_prev = self.reverse_diffusion_one_step(
+                key=subkey,
+                x_t=x,
+                t=t,  # Time step in reverse order
+                model_apply=model_apply,
+            )
+            update_buf = t % (self.diffusion_steps // num_intermediate) == 0
+            buf = jax.lax.cond(
+                update_buf,
+                lambda b: b.at[k].set(x_prev),
+                lambda b: b,
+                buf,
+            )
+            k = k + update_buf.astype(jnp.int32)
+
+            return (key, x_prev, buf, k), None
+
+        (_, x_0, intermediate, _), _ = jax.lax.scan(
+            f=body_fun,
+            init=(key, jax.random.normal(subkey, shape), buf, 0),
+            xs=jnp.arange(self.diffusion_steps - 1, -1, -1),
+        )
+        return x_0, intermediate

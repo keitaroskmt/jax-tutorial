@@ -32,3 +32,7 @@ The training time for one epoch (batch size = 128) is as follows:
 
 CPU time is measured on Apple M3 Pro.
 The training time is measured for the subsequent epochs after the first jit compilation.
+
+## DDPM
+
+Denoising diffusion probabilistic model implementation using Flax.
