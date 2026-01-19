@@ -1,18 +1,50 @@
 """Training script for a simple MLP on the MNIST dataset using JAX."""
 
+import argparse
 import logging
 import time
+from dataclasses import dataclass
 
 import jax
 import jax.numpy as jnp
 
 from src.dataset.mnist import get_loaders
 
+
 # Hyperparameters
-batch_size = 128
-num_epochs = 10
-num_classes = 10
-learning_rate = 0.001
+@dataclass
+class Config:
+    """Configuration for training."""
+
+    batch_size: int
+    num_epochs: int
+    learning_rate: float
+    num_classes: int = 10
+
+
+def parse_args() -> Config:
+    """Parse command-line arguments."""
+    parser = argparse.ArgumentParser()
+    parser.add_argument(
+        "--batch-size",
+        type=int,
+        default=128,
+        help="Batch size for training",
+    )
+    parser.add_argument(
+        "--num-epochs",
+        type=int,
+        default=10,
+        help="Number of training epochs",
+    )
+    parser.add_argument(
+        "--learning-rate",
+        type=float,
+        default=0.001,
+        help="Learning rate for optimizer",
+    )
+    args = parser.parse_args()
+    return Config(**vars(args))
 
 
 # Model definition
@@ -56,9 +88,13 @@ def mlp_forward(params: list[tuple[jax.Array, jax.Array]], x: jax.Array) -> jax.
 
 
 # Loss and accuracy functions
-def cross_entropy_loss(logits: jax.Array, labels: jax.Array) -> jax.Array:
+def cross_entropy_loss(
+    config: Config,
+    logits: jax.Array,
+    labels: jax.Array,
+) -> jax.Array:
     """Compute the cross-entropy loss."""
-    one_hot_labels = jax.nn.one_hot(labels, num_classes=num_classes)
+    one_hot_labels = jax.nn.one_hot(labels, num_classes=config.num_classes)
     log_probs = jax.nn.log_softmax(logits)
     return -jnp.mean(jnp.sum(one_hot_labels * log_probs, axis=1))
 
@@ -72,31 +108,33 @@ def compute_accuracy(logits: jax.Array, labels: jax.Array) -> jax.Array:
 # Training and evaluation step
 @jax.jit
 def train_step(
+    config: Config,
     params: list[tuple[jax.Array, jax.Array]],
     x: jax.Array,
     y: jax.Array,
 ) -> list[tuple[jax.Array, jax.Array]]:
     """Perform a single training step."""
-    grads = jax.grad(lambda p, x, y: cross_entropy_loss(mlp_forward(p, x), y))(
+    grads = jax.grad(lambda p, x, y: cross_entropy_loss(config, mlp_forward(p, x), y))(
         params,
         x,
         y,
     )
     return [
-        (w - learning_rate * dw, b - learning_rate * db)
+        (w - config.learning_rate * dw, b - config.learning_rate * db)
         for (w, b), (dw, db) in zip(params, grads, strict=False)
     ]
 
 
 @jax.jit
 def eval_step(
+    config: Config,
     params: list[tuple[jax.Array, jax.Array]],
     x: jax.Array,
     y: jax.Array,
 ) -> tuple[jax.Array, jax.Array]:
     """Evaluate the model on a batch."""
     logits = mlp_forward(params, x)
-    loss = cross_entropy_loss(logits, y)
+    loss = cross_entropy_loss(config, logits, y)
     accuracy = compute_accuracy(logits, y)
     return loss, accuracy
 
@@ -105,15 +143,17 @@ if __name__ == "__main__":
     logging.basicConfig(level=logging.INFO)
     logger = logging.getLogger(__name__)
 
-    train_loader, test_loader = get_loaders(batch_size)
+    config = parse_args()
+    train_loader, test_loader = get_loaders(config.batch_size)
     key = jax.random.key(0)
     key, subkey = jax.random.split(key)
-    params = init_mlp_params([784, 512, 512, num_classes], subkey)
+    params = init_mlp_params([784, 512, 512, config.num_classes], subkey)
 
-    for epoch in range(num_epochs):
+    for epoch in range(config.num_epochs):
         start_time = time.time()
         for data, target in train_loader:
-            params = train_step(params, data, target)
+            params = train_step(config, params, data, target)
+        jax.tree_util.tree_map(lambda x: x.block_until_ready(), params)
         epoch_time = time.time() - start_time
         logger.info("Epoch %d completed in %.2f seconds", epoch + 1, epoch_time)
 
@@ -122,7 +162,7 @@ if __name__ == "__main__":
         test_accuracy = 0.0
         num_batches = 0
         for data, labels in test_loader:
-            loss, accuracy = eval_step(params, data, labels)
+            loss, accuracy = eval_step(config, params, data, labels)
             test_loss += loss
             test_accuracy += accuracy
             num_batches += 1
