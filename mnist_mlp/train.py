@@ -177,7 +177,7 @@ if __name__ == "__main__":
         num_batches = 0
         for data, labels in test_loader:
             loss, accuracy = eval_step(
-                params, data, labels, num_classes=config.num_classes
+                params, data, labels, num_classes=config.num_classes,
             )
             test_loss += loss
             test_accuracy += accuracy
