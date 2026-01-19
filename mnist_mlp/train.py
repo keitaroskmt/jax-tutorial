@@ -1,6 +1,7 @@
 """Training script for a simple MLP on the MNIST dataset using JAX."""
 
 import argparse
+import functools
 import logging
 import time
 from dataclasses import dataclass
@@ -89,12 +90,12 @@ def mlp_forward(params: list[tuple[jax.Array, jax.Array]], x: jax.Array) -> jax.
 
 # Loss and accuracy functions
 def cross_entropy_loss(
-    config: Config,
     logits: jax.Array,
     labels: jax.Array,
+    num_classes: int,
 ) -> jax.Array:
     """Compute the cross-entropy loss."""
-    one_hot_labels = jax.nn.one_hot(labels, num_classes=config.num_classes)
+    one_hot_labels = jax.nn.one_hot(labels, num_classes=num_classes)
     log_probs = jax.nn.log_softmax(logits)
     return -jnp.mean(jnp.sum(one_hot_labels * log_probs, axis=1))
 
@@ -106,35 +107,42 @@ def compute_accuracy(logits: jax.Array, labels: jax.Array) -> jax.Array:
 
 
 # Training and evaluation step
-@jax.jit
+@functools.partial(jax.jit, static_argnames=("num_classes",))
 def train_step(
-    config: Config,
     params: list[tuple[jax.Array, jax.Array]],
     x: jax.Array,
     y: jax.Array,
+    num_classes: int,
+    learning_rate: float,
 ) -> list[tuple[jax.Array, jax.Array]]:
     """Perform a single training step."""
-    grads = jax.grad(lambda p, x, y: cross_entropy_loss(config, mlp_forward(p, x), y))(
+    grads = jax.grad(
+        lambda p, x, y: cross_entropy_loss(
+            mlp_forward(p, x),
+            y,
+            num_classes=num_classes,
+        ),
+    )(
         params,
         x,
         y,
     )
     return [
-        (w - config.learning_rate * dw, b - config.learning_rate * db)
+        (w - learning_rate * dw, b - learning_rate * db)
         for (w, b), (dw, db) in zip(params, grads, strict=False)
     ]
 
 
-@jax.jit
+@functools.partial(jax.jit, static_argnames=("num_classes",))
 def eval_step(
-    config: Config,
     params: list[tuple[jax.Array, jax.Array]],
     x: jax.Array,
     y: jax.Array,
+    num_classes: int,
 ) -> tuple[jax.Array, jax.Array]:
     """Evaluate the model on a batch."""
     logits = mlp_forward(params, x)
-    loss = cross_entropy_loss(config, logits, y)
+    loss = cross_entropy_loss(logits, y, num_classes=num_classes)
     accuracy = compute_accuracy(logits, y)
     return loss, accuracy
 
@@ -152,7 +160,13 @@ if __name__ == "__main__":
     for epoch in range(config.num_epochs):
         start_time = time.time()
         for data, target in train_loader:
-            params = train_step(config, params, data, target)
+            params = train_step(
+                params,
+                data,
+                target,
+                num_classes=config.num_classes,
+                learning_rate=config.learning_rate,
+            )
         jax.tree_util.tree_map(lambda x: x.block_until_ready(), params)
         epoch_time = time.time() - start_time
         logger.info("Epoch %d completed in %.2f seconds", epoch + 1, epoch_time)
@@ -162,7 +176,9 @@ if __name__ == "__main__":
         test_accuracy = 0.0
         num_batches = 0
         for data, labels in test_loader:
-            loss, accuracy = eval_step(config, params, data, labels)
+            loss, accuracy = eval_step(
+                params, data, labels, num_classes=config.num_classes
+            )
             test_loss += loss
             test_accuracy += accuracy
             num_batches += 1
