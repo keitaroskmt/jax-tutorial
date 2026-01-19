@@ -1,9 +1,14 @@
 """MNIST dataset loading and preprocessing using PyTorch and JAX."""
 
+import os
+from pathlib import Path
+
 import jax
-import numpy as np
+import jax.numpy as jnp
 import torchvision
 from torch.utils.data import DataLoader, Dataset, default_collate
+
+DATA_DIR = Path(os.environ.get("DATA_DIR", "~/pytorch_datasets")).expanduser()
 
 
 def get_datasets() -> tuple[Dataset, Dataset]:
@@ -15,13 +20,13 @@ def get_datasets() -> tuple[Dataset, Dataset]:
         ],
     )
     train_dataset = torchvision.datasets.MNIST(
-        root="~/pytorch_datasets",
+        root=DATA_DIR,
         train=True,
         download=True,
         transform=transform,
     )
     test_dataset = torchvision.datasets.MNIST(
-        root="~/pytorch_datasets",
+        root=DATA_DIR,
         train=False,
         download=True,
         transform=transform,
@@ -31,7 +36,7 @@ def get_datasets() -> tuple[Dataset, Dataset]:
 
 def collate_fn(batch: list):  # noqa: ANN201
     """Convert batch data to JAX arrays."""
-    return jax.tree_util.tree_map(np.asarray, default_collate(batch))
+    return jax.tree_util.tree_map(jnp.asarray, default_collate(batch))
 
 
 def get_loaders(batch_size: int) -> tuple[DataLoader, DataLoader]:

@@ -1,9 +1,14 @@
 """CIFAR10 dataset loading and preprocessing using PyTorch and JAX."""
 
+import os
+from pathlib import Path
+
 import jax
 import numpy as np
 import torchvision
 from torch.utils.data import DataLoader, Dataset, default_collate
+
+DATA_DIR = Path(os.environ.get("DATA_DIR", "~/pytorch_datasets")).expanduser()
 
 
 def get_datasets() -> tuple[Dataset, Dataset]:
@@ -16,13 +21,13 @@ def get_datasets() -> tuple[Dataset, Dataset]:
         ],
     )
     train_dataset = torchvision.datasets.CIFAR10(
-        root="~/pytorch_datasets",
+        root=DATA_DIR,
         train=True,
         download=True,
         transform=transform,
     )
     test_dataset = torchvision.datasets.CIFAR10(
-        root="~/pytorch_datasets",
+        root=DATA_DIR,
         train=False,
         download=True,
         transform=transform,
