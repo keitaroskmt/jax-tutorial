@@ -12,3 +12,10 @@ wheels/
 saved_model/
 # Generated samples
 ddpm/samples/
+
+# Apptainer files
+*.sif
+*.img
+.nv/
+.cache/
+.bash_history
