@@ -1,7 +1,9 @@
 """Training script for denoising diffusion probabilistic models (DDPM) using JAX."""
 
+import argparse
 import logging
 import time
+from dataclasses import dataclass
 from pathlib import Path
 
 import absl
@@ -15,13 +17,43 @@ from ddpm.diffusion import Diffusion
 from src.dataset.cifar10 import get_loaders
 from src.model.unet import UNet
 
+
 # Hyperparameters
-batch_size = 128
-num_epochs = 20
-learning_rate = 1e-3
+@dataclass
+class Config:
+    """Configuration for training."""
+
+    batch_size: int
+    num_epochs: int
+    learning_rate: float
 
 
-def create_train_state(key: jax.Array) -> TrainState:
+def parse_args() -> Config:
+    """Parse command-line arguments."""
+    parser = argparse.ArgumentParser()
+    parser.add_argument(
+        "--batch-size",
+        type=int,
+        default=128,
+        help="Batch size for training",
+    )
+    parser.add_argument(
+        "--num-epochs",
+        type=int,
+        default=20,
+        help="Number of training epochs",
+    )
+    parser.add_argument(
+        "--learning-rate",
+        type=float,
+        default=1e-3,
+        help="Learning rate for optimizer",
+    )
+    args = parser.parse_args()
+    return Config(**vars(args))
+
+
+def create_train_state(key: jax.Array, learning_rate: float) -> TrainState:
     """Create initial TrainState for training."""
     model = UNet()
     params = model.init(
@@ -100,18 +132,20 @@ if __name__ == "__main__":
     logger = logging.getLogger(__name__)
     absl.logging.set_verbosity(absl.logging.WARNING)
 
-    train_loader, test_loader = get_loaders(batch_size)
+    config = parse_args()
+    train_loader, test_loader = get_loaders(config.batch_size)
     key = jax.random.key(0)
     key, subkey = jax.random.split(key)
-    state = create_train_state(subkey)
+    state = create_train_state(subkey, config.learning_rate)
 
     diffusion = Diffusion.create()
 
-    for epoch in range(num_epochs):
+    for epoch in range(config.num_epochs):
         start_time = time.time()
         for data, _ in train_loader:
             key, subkey = jax.random.split(key)
             state, loss = train_step(state, diffusion, subkey, data)
+        jax.tree_util.tree_map(lambda x: x.block_until_ready(), state.params)
         epoch_time = time.time() - start_time
         logger.info("Epoch %d, Loss: %.4f", epoch + 1, loss)
         logger.info("Epoch %d completed in %.2f seconds", epoch + 1, epoch_time)
@@ -128,7 +162,7 @@ if __name__ == "__main__":
         logger.info("Epoch %d, Test Loss: %.4f", epoch + 1, test_loss)
 
     # Save the trained model
-    save_dir = Path("./ddpm/saved_model") / f"unet_cifar10_lr_{learning_rate}"
+    save_dir = Path("./ddpm/saved_model") / f"unet_cifar10_lr_{config.learning_rate}"
     save_dir.mkdir(parents=True, exist_ok=True)
 
     options = ocp.CheckpointManagerOptions(create=True)
