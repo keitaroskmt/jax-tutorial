@@ -1,5 +1,7 @@
 """Generate samples from a trained diffusion model."""
 
+import argparse
+from dataclasses import dataclass
 from functools import partial
 from pathlib import Path
 
@@ -14,6 +16,41 @@ from PIL import Image
 from ddpm.diffusion import Diffusion
 from src.dataset.cifar10 import revert_transform
 from src.model.unet import UNet
+
+
+# Hyperparameters
+@dataclass
+class Config:
+    """Configuration for sampling."""
+
+    num_samples: int
+    num_intermediate: int
+    checkpoint_dir: Path
+
+
+def parse_args() -> Config:
+    """Parse command-line arguments."""
+    parser = argparse.ArgumentParser()
+    parser.add_argument(
+        "--num-samples",
+        type=int,
+        default=4,
+        help="Number of samples to generate",
+    )
+    parser.add_argument(
+        "--num-intermediate",
+        type=int,
+        default=100,
+        help="Number of intermediate steps to generate",
+    )
+    parser.add_argument(
+        "--checkpoint-dir",
+        type=Path,
+        default=Path("./ddpm/saved_model/unet_cifar10_lr_0.001"),
+        help="Directory of the model checkpoint",
+    )
+    args = parser.parse_args()
+    return Config(**vars(args))
 
 
 def create_empty_state(key: jax.Array) -> TrainState:
@@ -93,32 +130,42 @@ if __name__ == "__main__":
     key = jax.random.key(0)
     key, subkey = jax.random.split(key)
 
-    save_dir = Path("./ddpm/saved_model") / "unet_cifar10_lr_0.001"
+    config = parse_args()
+
     state = create_empty_state(subkey)
     state = restore_state(
-        save_dir.absolute(),
+        config.checkpoint_dir.absolute(),
         state,
     )
 
-    num_samples = 4
     samples, intermediate = sample_with_intermediate(
         state,
         diffusion,
         key,
-        num_samples,
-        num_intermediate=10,
+        config.num_samples,
+        num_intermediate=config.num_intermediate,
     )
 
-    for i in range(num_samples):
+    for i in range(config.num_samples):
         for j in range(intermediate.shape[0]):
-            img = revert_transform(intermediate[j, i]) * 255.0
-            img_np = np.array(img, dtype=np.uint8)
-            img_path = Path("./ddpm/samples") / f"sample_{i}_step_{j}.png"
+            img = revert_transform(intermediate[j, i])
+            img = jnp.clip(img, 0.0, 1.0)
+            img_np = np.array(img * 255.0, dtype=np.uint8)
+            img_path = (
+                Path("./ddpm/samples")
+                / config.checkpoint_dir.name
+                / f"sample_{i}_step_{j}.png"
+            )
             img_path.parent.mkdir(parents=True, exist_ok=True)
             with img_path.open("wb") as f:
                 Image.fromarray(img_np).save(f)
-        final_img = revert_transform(samples[i]) * 255.0
-        final_img_np = np.array(final_img, dtype=np.uint8)
-        final_img_path = Path("./ddpm/samples") / f"sample_{i}_final.png"
+        final_img = revert_transform(samples[i])
+        final_img = jnp.clip(final_img, 0.0, 1.0)
+        final_img_np = np.array(final_img * 255.0, dtype=np.uint8)
+        final_img_path = (
+            Path("./ddpm/samples")
+            / config.checkpoint_dir.name
+            / f"sample_{i}_final.png"
+        )
         with final_img_path.open("wb") as f:
             Image.fromarray(final_img_np).save(f)
