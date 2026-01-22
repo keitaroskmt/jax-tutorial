@@ -95,6 +95,7 @@ class Diffusion:
 
         """
         beta_t = self.beta[t]
+        alpha_t = self.alpha[t]
         alpha_bar_t = self.alpha_bar[t]
         noise = jax.lax.cond(
             t > 0,
@@ -106,7 +107,7 @@ class Diffusion:
 
         # Equation (11) in the paper
         return (x_t - beta_t / jnp.sqrt(1 - alpha_bar_t) * predicted_noise) / jnp.sqrt(
-            alpha_bar_t,
+            alpha_t,
         ) + jnp.sqrt(self.beta[t]) * noise
 
     def reverse_diffusion(
