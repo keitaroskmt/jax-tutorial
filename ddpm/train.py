@@ -14,7 +14,7 @@ import orbax.checkpoint as ocp
 from flax.training.train_state import TrainState
 
 from ddpm.diffusion import Diffusion
-from src.dataset.cifar10 import get_loaders
+from src.dataset import celeba, cifar10
 from src.model.unet import UNet
 
 
@@ -23,6 +23,8 @@ from src.model.unet import UNet
 class Config:
     """Configuration for training."""
 
+    dataset: str
+    image_size: int
     batch_size: int
     num_epochs: int
     learning_rate: float
@@ -31,6 +33,19 @@ class Config:
 def parse_args() -> Config:
     """Parse command-line arguments."""
     parser = argparse.ArgumentParser()
+    parser.add_argument(
+        "--dataset",
+        type=str,
+        choices=["cifar10", "celeba"],
+        default="cifar10",
+        help="Dataset to use for training",
+    )
+    parser.add_argument(
+        "--image-size",
+        type=int,
+        default=128,
+        help="Image size (only for CelebA dataset)",
+    )
     parser.add_argument(
         "--batch-size",
         type=int,
@@ -53,12 +68,16 @@ def parse_args() -> Config:
     return Config(**vars(args))
 
 
-def create_train_state(key: jax.Array, learning_rate: float) -> TrainState:
+def create_train_state(
+    key: jax.Array,
+    learning_rate: float,
+    image_size: int,
+) -> TrainState:
     """Create initial TrainState for training."""
     model = UNet()
     params = model.init(
         key,
-        jnp.ones((1, 32, 32, 3)),
+        jnp.ones((1, image_size, image_size, 3)),
         jnp.ones((1,)),
         train=False,
     )["params"]
@@ -133,10 +152,19 @@ if __name__ == "__main__":
     absl.logging.set_verbosity(absl.logging.WARNING)
 
     config = parse_args()
-    train_loader, test_loader = get_loaders(config.batch_size)
+    if config.dataset == "cifar10":
+        train_loader, test_loader = cifar10.get_loaders(config.batch_size)
+        image_size = 32
+    elif config.dataset == "celeba":
+        train_loader, test_loader = celeba.get_loaders(
+            batch_size=config.batch_size,
+            image_size=config.image_size,
+            train_subset_size=20000,
+        )
+        image_size = config.image_size
     key = jax.random.key(0)
     key, subkey = jax.random.split(key)
-    state = create_train_state(subkey, config.learning_rate)
+    state = create_train_state(subkey, config.learning_rate, image_size)
 
     diffusion = Diffusion.create()
 
@@ -162,7 +190,9 @@ if __name__ == "__main__":
         logger.info("Epoch %d, Test Loss: %.4f", epoch + 1, test_loss)
 
     # Save the trained model
-    save_dir = Path("./ddpm/saved_model") / f"unet_cifar10_lr_{config.learning_rate}"
+    save_dir = (
+        Path("./ddpm/saved_model") / f"unet_{config.dataset}_lr_{config.learning_rate}"
+    )
     save_dir.mkdir(parents=True, exist_ok=True)
 
     options = ocp.CheckpointManagerOptions(create=True)

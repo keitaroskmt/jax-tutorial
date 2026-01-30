@@ -23,6 +23,7 @@ from src.model.unet import UNet
 class Config:
     """Configuration for sampling."""
 
+    image_size: int
     num_samples: int
     num_intermediate: int
     checkpoint_dir: Path
@@ -31,6 +32,12 @@ class Config:
 def parse_args() -> Config:
     """Parse command-line arguments."""
     parser = argparse.ArgumentParser()
+    parser.add_argument(
+        "--image-size",
+        type=int,
+        default=32,
+        help="Image size",
+    )
     parser.add_argument(
         "--num-samples",
         type=int,
@@ -53,12 +60,12 @@ def parse_args() -> Config:
     return Config(**vars(args))
 
 
-def create_empty_state(key: jax.Array) -> TrainState:
+def create_empty_state(key: jax.Array, image_size: int) -> TrainState:
     """Create an empty TrainState for loading checkpoints."""
     model = UNet()
     params = model.init(
         key,
-        jnp.ones((1, 32, 32, 3)),
+        jnp.ones((1, image_size, image_size, 3)),
         jnp.ones((1,)),
         train=False,
     )["params"]
@@ -76,12 +83,13 @@ def restore_state(
         return mngr.restore(step=step, args=ocp.args.StandardRestore(state))
 
 
-@partial(jax.jit, static_argnames=("num_samples",))
+@partial(jax.jit, static_argnames=("num_samples", "image_size"))
 def sample_final(
     state: TrainState,
     diffusion: Diffusion,
     key: jax.Array,
     num_samples: int,
+    image_size: int = 32,
 ) -> jax.Array:
     """Generate final samples from the diffusion model."""
 
@@ -91,25 +99,26 @@ def sample_final(
     return diffusion.reverse_diffusion(
         key=key,
         model_apply=model_apply,
-        shape=(num_samples, 32, 32, 3),
+        shape=(num_samples, image_size, image_size, 3),
     )
 
 
-@partial(jax.jit, static_argnames=("num_samples", "num_intermediate"))
-def sample_with_intermediate(
+@partial(jax.jit, static_argnames=("num_samples", "num_intermediate", "image_size"))
+def sample_with_intermediate(  # noqa: PLR0913
     state: TrainState,
     diffusion: Diffusion,
     key: jax.Array,
     num_samples: int,
     num_intermediate: int = 10,
+    image_size: int = 32,
 ) -> tuple[jax.Array, jax.Array]:
     """Generate samples with intermediate steps from the diffusion model.
 
     Returns:
         Tuple of:
-        - Final reconstructed images with shape (num_samples, 32, 32, 3).
+        - Reconstructed images with shape (num_samples, image_size, image_size, 3).
         - Intermediate reconstructed images
-            with shape (num_intermediate, num_samples, 32, 32, 3).
+            with shape (num_intermediate, num_samples, image_size, image_size, 3).
 
     """
 
@@ -119,7 +128,7 @@ def sample_with_intermediate(
     return diffusion.reverse_diffusion_with_intermediate(
         key=key,
         model_apply=model_apply,
-        shape=(num_samples, 32, 32, 3),
+        shape=(num_samples, image_size, image_size, 3),
         num_intermediate=num_intermediate,
     )
 
@@ -132,7 +141,7 @@ if __name__ == "__main__":
 
     config = parse_args()
 
-    state = create_empty_state(subkey)
+    state = create_empty_state(subkey, config.image_size)
     state = restore_state(
         config.checkpoint_dir.absolute(),
         state,
@@ -144,6 +153,7 @@ if __name__ == "__main__":
         key,
         config.num_samples,
         num_intermediate=config.num_intermediate,
+        image_size=config.image_size,
     )
 
     for i in range(config.num_samples):
