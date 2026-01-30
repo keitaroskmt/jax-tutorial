@@ -16,6 +16,7 @@ dependencies = [
     "torch>=2.8.0",
     "torchvision>=0.23.0",
     "gdown>=5.2.1",
+    "imageio>=2.37.2",
 ]
 
 [dependency-groups]
